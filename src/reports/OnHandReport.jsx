@@ -50,10 +50,25 @@ const DEFAULT_COLUMNS = [
   '0582',
 ]
 
+const ON_HAND_STORAGE_KEY = 'scor-on-hand-report-v1'
+
+function loadSavedOnHand() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ON_HAND_STORAGE_KEY) || 'null')
+    if (saved && Array.isArray(saved.columns) && Array.isArray(saved.rows)) return saved
+  } catch (error) {
+    console.warn('Unable to load saved On Hand data:', error)
+  }
+  return null
+}
+
 function OnHandReport({ onBack }) {
-  const [columns, setColumns] = useState(DEFAULT_COLUMNS)
-  const [rows, setRows] = useState([])
-  const [fileName, setFileName] = useState('')
+  const [initialSaved] = useState(() => loadSavedOnHand())
+  const [columns, setColumns] = useState(() => initialSaved?.columns || DEFAULT_COLUMNS)
+  const [rows, setRows] = useState(() => initialSaved?.rows || [])
+  const [fileName, setFileName] = useState(() => initialSaved?.fileName || '')
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [saveMessage, setSaveMessage] = useState(initialSaved ? 'Saved data restored from this browser.' : '')
   const [search, setSearch] = useState('')
   const [message, setMessage] = useState('')
   const [pageSize, setPageSize] = useState(100)
@@ -107,11 +122,16 @@ function OnHandReport({ onBack }) {
 
         setColumns(headers)
         setRows(importedRows)
+        setHasUnsavedChanges(true)
+        setSaveMessage('Imported data is not saved yet.')
         setFileName(file.name)
         setDuplicateCount(uniqueDuplicates.size)
         setBlankSkuCount(blanks)
         setCurrentPage(1)
-        setMessage('Import completed successfully.')
+        setMessage(
+          `Imported ${importedRows.length.toLocaleString()} rows. ` +
+          `${uniqueDuplicates.size} duplicated item codes; ${blanks} blank item codes.`
+        )
       } catch {
         setMessage('Unable to read the Excel file. Please check the workbook format.')
       }
@@ -122,6 +142,8 @@ function OnHandReport({ onBack }) {
   }
 
   function updateCell(rowIndex, columnIndex, value) {
+    setHasUnsavedChanges(true)
+    setSaveMessage('You have unsaved changes.')
     setRows((currentRows) =>
       currentRows.map((row, index) =>
         index === rowIndex
@@ -134,6 +156,8 @@ function OnHandReport({ onBack }) {
   }
 
   function addItem() {
+    setHasUnsavedChanges(true)
+    setSaveMessage('New item added. Save to keep your changes.')
     setRows((currentRows) => [
       ...currentRows,
       columns.map(() => ''),
@@ -143,6 +167,8 @@ function OnHandReport({ onBack }) {
   }
 
   function deleteItem(rowIndex) {
+    setHasUnsavedChanges(true)
+    setSaveMessage('Item deleted. Save to keep your changes.')
     setRows((currentRows) =>
       currentRows.filter((_, index) => index !== rowIndex)
     )
@@ -151,6 +177,8 @@ function OnHandReport({ onBack }) {
   }
 
   function moveColumn(index, direction) {
+    setHasUnsavedChanges(true)
+    setSaveMessage('Column order changed. Save to keep your changes.')
     const targetIndex = index + direction
     if (targetIndex < 0 || targetIndex >= columns.length) return
 
@@ -187,7 +215,27 @@ function OnHandReport({ onBack }) {
     setMessage('100-row On Hand import template downloaded.')
   }
 
+  function saveAllChanges() {
+    try {
+      localStorage.setItem(ON_HAND_STORAGE_KEY, JSON.stringify({
+        columns,
+        rows,
+        fileName,
+        savedAt: new Date().toISOString(),
+      }))
+      setHasUnsavedChanges(false)
+      setSaveMessage(`Saved ${rows.length.toLocaleString()} item rows in this browser.`)
+    } catch (error) {
+      console.error('Unable to save On Hand data:', error)
+      setSaveMessage('Save failed. Your browser storage may be full or unavailable.')
+    }
+  }
+
   function exportExcel() {
+    if (!columns.length) {
+      setMessage('There are no columns to export.')
+      return
+    }
     const worksheet = XLSX.utils.aoa_to_sheet([
       columns,
       ...rows,
@@ -195,7 +243,7 @@ function OnHandReport({ onBack }) {
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, worksheet, 'On Hand')
     XLSX.writeFile(workbook, 'SCOR_On_Hand_Report.xlsx')
-    setMessage('Excel export completed successfully.')
+    setMessage(`Exported ${rows.length} item rows successfully.`)
   }
 
   const filteredRows = rows
@@ -210,152 +258,112 @@ function OnHandReport({ onBack }) {
   const safePage = Math.min(currentPage, totalPages)
   const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize)
 
-  const toolbarButtonStyle = {
-    padding: '9px 13px', border: '1px solid #d7e0ea', borderRadius: '7px',
-    background: '#fff', color: '#294763', fontWeight: 600, fontSize: '13px',
-    cursor: 'pointer'
-  }
-  const summaryCardStyle = {
-    display: 'flex', flexDirection: 'column', gap: '7px', padding: '14px 16px',
-    background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px',
-    boxShadow: '0 2px 8px rgba(20,45,75,0.035)'
-  }
-  const summaryLabelStyle = {
-    color: '#7b8b9d', fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em'
-  }
-  const summaryValueStyle = {
-    color: '#17365d', fontSize: '25px', lineHeight: 1.1, fontWeight: 700
-  }
-  const paginationButtonStyle = {
-    padding: '6px 9px', border: '1px solid #d7e0ea', borderRadius: '6px',
-    background: '#f8fafc', color: '#31577e', fontSize: '12px', cursor: 'pointer'
-  }
-
   return (
-    <div className="onhand-page" style={{
-      padding: '24px',
-      color: '#172b45',
-      background: '#f4f7fb',
-      minHeight: '100%'
-    }}>
-      <div className="onhand-header" style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        gap: '16px', marginBottom: '20px'
-      }}>
+    <div className="onhand-page">
+      <div className="onhand-header">
         <div>
-          <button type="button" onClick={onBack} style={{
-            border: 'none', background: 'transparent', color: '#47627f',
-            padding: '0 0 8px', cursor: 'pointer', fontWeight: 600
-          }}>← Back to Reports</button>
-          <h1 style={{ margin: 0, fontSize: '28px', lineHeight: 1.2, color: '#17365d' }}>On Hand</h1>
-          <p style={{ margin: '6px 0 0', color: '#718096', fontSize: '14px' }}>
-            Inventory balances by item and warehouse
-          </p>
+          <button type="button" onClick={onBack}>
+            ← Back to Reports
+          </button>
+          <h1>On Hand Report</h1>
+          <p>Inventory balances by item and warehouse</p>
         </div>
-        <div style={{
-          padding: '8px 12px', borderRadius: '8px', background: '#e8f0f8',
-          color: '#31577e', fontSize: '12px', fontWeight: 700, whiteSpace: 'nowrap'
-        }}>INVENTORY REPORT</div>
       </div>
 
-      <div className="onhand-toolbar" style={{
-        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px',
-        padding: '14px', background: '#fff', border: '1px solid #e2e8f0',
-        borderRadius: '12px', boxShadow: '0 2px 8px rgba(20,45,75,0.04)',
-        marginBottom: '14px'
-      }}>
-        <label className="onhand-upload" style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          padding: '9px 14px', borderRadius: '7px', background: '#173f67',
-          color: '#fff', fontWeight: 600, fontSize: '13px', cursor: 'pointer'
-        }}>
+      <div className="onhand-toolbar">
+        <label className="onhand-upload">
           Import Excel
-          <input type="file" accept=".xlsx,.xls" onChange={handleImport} hidden />
-        </label>
-        <button type="button" onClick={downloadTemplate} style={toolbarButtonStyle}>Download Template</button>
-        <button type="button" onClick={addItem} style={toolbarButtonStyle}>+ Add Item</button>
-        <button type="button" onClick={exportExcel} disabled={!rows.length} style={{
-          ...toolbarButtonStyle, opacity: rows.length ? 1 : 0.5,
-          cursor: rows.length ? 'pointer' : 'not-allowed'
-        }}>Export Excel</button>
-        <div style={{ flex: '1 1 240px', minWidth: '220px', marginLeft: 'auto' }}>
           <input
-            type="text"
-            placeholder="Search item code, product, brand..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setCurrentPage(1) }}
-            style={{
-              width: '100%', boxSizing: 'border-box', padding: '10px 12px',
-              border: '1px solid #d7e0ea', borderRadius: '7px',
-              outlineColor: '#3975a8', fontSize: '13px'
-            }}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleImport}
+            hidden
           />
-        </div>
+        </label>
+
+        <button type="button" onClick={downloadTemplate}>
+          Download 100-Row Template
+        </button>
+
+        <button type="button" onClick={addItem}>
+          + Add Item
+        </button>
+
+        <button type="button" onClick={saveAllChanges} disabled={!hasUnsavedChanges}>
+          Save Changes
+        </button>
+
+        <button type="button" onClick={exportExcel} disabled={!rows.length}>
+          Export Excel
+        </button>
+
+        <input
+          type="text"
+          placeholder="Search SKU, product or warehouse..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setCurrentPage(1)
+          }}
+        />
       </div>
 
-      {message && (
-        <div role="status" style={{
-          marginBottom: '14px', padding: '9px 12px', borderRadius: '7px',
-          background: message.toLowerCase().includes('unable') || message.toLowerCase().includes('empty')
-            ? '#fff1f0' : '#edf7f1',
-          color: message.toLowerCase().includes('unable') || message.toLowerCase().includes('empty')
-            ? '#a33a32' : '#286344',
-          fontSize: '12px'
-        }}>
-          {message}
-          {fileName && <span style={{ color: '#718096', marginLeft: '8px' }}>Source: {fileName}</span>}
-        </div>
+      {fileName && (
+        <p className="onhand-file-name">
+          Source file: {fileName}
+        </p>
       )}
 
-      <div className="onhand-summary" style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-        gap: '12px', marginBottom: '14px'
-      }}>
-        <div style={summaryCardStyle}>
-          <span style={summaryLabelStyle}>TOTAL ITEMS</span>
-          <strong style={summaryValueStyle}>{rows.length.toLocaleString()}</strong>
-        </div>
-        <div style={summaryCardStyle}>
-          <span style={summaryLabelStyle}>COLUMNS</span>
-          <strong style={summaryValueStyle}>{columns.length}</strong>
-        </div>
-        <div style={summaryCardStyle}>
-          <span style={summaryLabelStyle}>DUPLICATE ITEM CODES</span>
-          <strong style={{ ...summaryValueStyle, color: duplicateCount ? '#b45309' : '#286344' }}>
-            {duplicateCount.toLocaleString()}
-          </strong>
-        </div>
-        <div style={summaryCardStyle}>
-          <span style={summaryLabelStyle}>MISSING ITEM CODES</span>
-          <strong style={{ ...summaryValueStyle, color: blankSkuCount ? '#b45309' : '#286344' }}>
-            {blankSkuCount.toLocaleString()}
-          </strong>
-        </div>
+      {saveMessage && (
+        <p className="onhand-message" role="status">{saveMessage}</p>
+      )}
+      {message && (
+        <p className="onhand-message" role="status">{message}</p>
+      )}
+
+      <div className="onhand-summary">
+        <strong>{rows.length}</strong>
+        <span>Total Items</span>
+        <span>{columns.length} Columns</span>
+        <span>{filteredRows.length.toLocaleString()} Matching Rows</span>
+        <span>{duplicateCount} Duplicate Codes</span>
+        <span>{blankSkuCount} Blank Item Codes</span>
       </div>
 
       <div className="onhand-pagination" style={{
-        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px',
-        padding: '10px 12px', marginBottom: '12px', background: '#fff',
-        border: '1px solid #e2e8f0', borderRadius: '9px', fontSize: '13px'
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '10px',
+        padding: '10px 0'
       }}>
-        <label style={{ color: '#53677d', fontWeight: 600 }}>
-          Rows per page{' '}
-          <select value={pageSize} onChange={(e) => {
-            setPageSize(Number(e.target.value)); setCurrentPage(1)
-          }} style={{ marginLeft: '5px', padding: '6px', border: '1px solid #d7e0ea', borderRadius: '6px' }}>
+        <label>
+          Rows per page:{' '}
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value))
+              setCurrentPage(1)
+            }}
+          >
             <option value={100}>100</option>
             <option value={250}>250</option>
             <option value={500}>500</option>
           </select>
         </label>
-        <span style={{ marginLeft: 'auto', color: '#718096' }}>
-          Showing {filteredRows.length ? ((safePage - 1) * pageSize + 1).toLocaleString() : 0}–{Math.min(safePage * pageSize, filteredRows.length).toLocaleString()} of {filteredRows.length.toLocaleString()}
-        </span>
-        <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage(1)} style={paginationButtonStyle}>First</button>
-        <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} style={paginationButtonStyle}>Previous</button>
-        <span style={{ color: '#31577e', fontWeight: 700 }}>Page {safePage.toLocaleString()} / {totalPages.toLocaleString()}</span>
-        <button type="button" disabled={safePage >= totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} style={paginationButtonStyle}>Next</button>
-        <button type="button" disabled={safePage >= totalPages} onClick={() => setCurrentPage(totalPages)} style={paginationButtonStyle}>Last</button>
+        <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage(1)}>
+          First
+        </button>
+        <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+          Previous
+        </button>
+        <span>Page {safePage.toLocaleString()} of {totalPages.toLocaleString()}</span>
+        <button type="button" disabled={safePage >= totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>
+          Next
+        </button>
+        <button type="button" disabled={safePage >= totalPages} onClick={() => setCurrentPage(totalPages)}>
+          Last
+        </button>
       </div>
 
       <details className="onhand-column-settings" style={{ margin: '12px 0' }}>
@@ -419,7 +427,6 @@ function OnHandReport({ onBack }) {
                   borderRight: '1px solid #355575'
                 }}>{column}</th>
               ))}
-              <th>Actions</th>
             </tr>
           </thead>
 
@@ -451,19 +458,11 @@ function OnHandReport({ onBack }) {
                       />
                     </td>
                   ))}
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => deleteItem(originalIndex)}
-                    >
-                      Delete
-                    </button>
-                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={columns.length + 1} className="onhand-no-rows" style={{
+                <td colSpan={columns.length} className="onhand-no-rows" style={{
                   padding: '24px',
                   textAlign: 'center',
                   color: '#64748b'
