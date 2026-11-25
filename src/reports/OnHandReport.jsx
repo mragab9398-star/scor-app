@@ -461,7 +461,7 @@ function OnHandReport({ onBack }) {
                   position: 'sticky', top: 0, zIndex: 3,
                   background: colors.navy, color: '#fff',
 padding: '10px 12px',
-minWidth: columnIndex < 4 ? 180 : 150,
+minWidth: index < 4 ? 180 : 150,
 borderRight: '1px solid #e7edf3',
 borderBottom: '1px solid #e7edf3',
                 }}>{column}</th>
@@ -475,7 +475,7 @@ borderBottom: '1px solid #e7edf3',
               }}>
                 {columns.map((column, columnIndex) => (
                   <td key={`${column}-${columnIndex}`} style={{
-                    padding: '7px 9px', minWidth: columnIndex < 4 ? 155 : 125,
+                    padding: '7px 9px', minWidth: columnIndex < 4 ? 180 : 150,
                     borderRight: '1px solid #e7edf3', borderBottom: '1px solid #e7edf3',
                   }}>
                     <input
